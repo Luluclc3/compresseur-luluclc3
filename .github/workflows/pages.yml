@@ -31,10 +31,14 @@ jobs:
           from pathlib import Path
           p = Path('index.html')
           s = p.read_text(encoding='utf-8')
-          css = '<link rel="stylesheet" href="animations.css">'
-          if css not in s:
-              s = s.replace('</head>', css + '</head>')
-          for src in ('upgrade.js', 'admin.js', 'ux.js'):
+          tags = [
+              '<link rel="stylesheet" href="public/css/animations.css">',
+              '<link rel="stylesheet" href="public/css/connection-animation.css">',
+          ]
+          for css in tags:
+              if css not in s:
+                  s = s.replace('</head>', css + '</head>')
+          for src in ('upgrade.js', 'admin.js', 'ux.js', 'public/js/connection-animation.js', 'public/js/site-motion.js'):
               tag = f'<script src="{src}"></script>'
               if tag not in s:
                   s = s.replace('</body>', tag + '</body>')
