@@ -1,15 +1,4 @@
 (()=>{
-'use strict';
-const APP_VERSION='2026-08-08-2200';
-const VERSION_URL='/version.json';
-if(!sessionStorage.getItem('lulu_version_checked_'+APP_VERSION)){
-  fetch(VERSION_URL+'?t='+Date.now(),{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
-    if(v&&v.version&&v.version!==APP_VERSION){
-      sessionStorage.setItem('lulu_version_checked_'+v.version,'1');
-      const u=new URL(location.href);u.searchParams.set('v',v.version);location.replace(u.href);
-    }else sessionStorage.setItem('lulu_version_checked_'+APP_VERSION,'1');
-  }).catch(()=>{});
-}
 const API='https://compresseur-luluclc3-vip.lucascl0606.workers.dev';
 const sid=sessionStorage.getItem('lulu_session')||crypto.randomUUID();sessionStorage.setItem('lulu_session',sid);
 const sessionStart=Number(sessionStorage.getItem('lulu_session_start')||Date.now());sessionStorage.setItem('lulu_session_start',String(sessionStart));
