@@ -1,0 +1,3 @@
+name = "compresseur-luluclc3-vip"
+main = "src/index.js"
+compatibility_date = "2026-08-08"
