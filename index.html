@@ -54,5 +54,6 @@ $('#extract').onclick=async()=>{if(!files.length)return;const f=files[0];if(!/\.
 $('#download').onclick=()=>{if(!archive)return;const a=document.createElement('a');a.href=URL.createObjectURL(archive);a.download=downloadName;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1200)};$('#again').onclick=()=>{archive=null;files=[];$('#picker').value='';$('#result').classList.add('hidden');setMode(mode)};
 setMode('compress');
 </script>
+<script src="progress.js"></script>
 </body>
 </html>
