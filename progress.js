@@ -40,4 +40,23 @@
 
   window.progress=smoothProgress;
   window.showProgress=smoothShow;
+
+  // Correction : en mode standard, l'ancienne interface remplissait
+  // automatiquement "Taille cible". Le bouton de compression pensait alors
+  // qu'une cible VIP avait été demandée et ouvrait le panneau VIP.
+  const originalUpdateTargetUI=window.updateTargetUI;
+  if(typeof originalUpdateTargetUI==='function'){
+    window.updateTargetUI=()=>{
+      if(typeof vip!=='undefined' && !vip){
+        const input=$('#target'),range=$('#targetRange'),rangePct=$('#rangePct'),read=$('#targetRead');
+        if(input)input.value='';
+        if(range)range.value='100';
+        if(rangePct)rangePct.textContent='100 %';
+        if(read)read.innerHTML='Aucune cible précise en mode standard. <b>Smart</b> et <b>Plus petit</b> sont disponibles sans VIP.';
+        return;
+      }
+      originalUpdateTargetUI();
+    };
+    window.updateTargetUI();
+  }
 })();
