@@ -83,15 +83,15 @@
       }
       bitmap.close?.();
       if(!best||best.data.length>=original.length){
-        return {name:file.name,data:original,changed:false};
+        return {name:file.name,data:original,changed:false,mime:file.type||'application/octet-stream'};
       }
       const base=file.name.replace(/\.[^.]+$/,'');
       const newName=base+info.ext;
       progress(30+(index/Math.max(totalImages,1))*25,'OPTIMISATION',fmt(file.size)+' → '+fmt(best.data.length)+' · '+newName);
-      return {name:newName,data:best.data,changed:true};
+      return {name:newName,data:best.data,changed:true,mime:info.mime};
     }catch(e){
       console.warn('Compression image impossible',file.name,e);
-      return {name:file.name,data:new Uint8Array(await file.arrayBuffer()),changed:false};
+      return {name:file.name,data:new Uint8Array(await file.arrayBuffer()),changed:false,mime:file.type||'application/octet-stream'};
     }
   }
 
@@ -127,7 +127,30 @@
     const currentProfile=getProfile(),targetInput=$('#target'),targetValue=targetInput?.value?.trim?.()??'';
     if(typeof vip!=='undefined'&&!vip&&targetValue){if($('#targetRead'))$('#targetRead').innerHTML='✦ La cible exacte est réservée au VIP.';if(typeof openVip==='function')openVip();return}
     showProgress('Préparation de la compression');
-    const total=currentFiles.reduce((a,f)=>a+(f?.size||0),0),data=await prepareData(currentFiles,currentProfile),target=readVipTarget(),out=await buildZip(data,currentProfile,target);
+    const total=currentFiles.reduce((a,f)=>a+(f?.size||0),0);
+    const onlyOneImage=currentFiles.length===1&&!!imageInfo(currentFiles[0]);
+
+    // Une image seule doit ressortir comme une vraie image compressée, pas comme une archive ZIP.
+    if(onlyOneImage){
+      const result=await compressImageFile(currentFiles[0],currentProfile,0,1);
+      const outBlob=new Blob([result.data],{type:result.mime||'image/webp'});
+      archive=outBlob;
+      downloadName=result.name;
+      progress(100,'TERMINÉ',result.changed?'Image réellement compressée localement':'Image déjà plus petite que les réglages disponibles');
+      await new Promise(r=>setTimeout(r,300));
+      $('#progress')?.classList.add('hidden');$('#result')?.classList.remove('hidden');
+      if($('#resultEyebrow'))$('#resultEyebrow').textContent='COMPRESSION TERMINÉE';
+      if($('#resultTitle'))$('#resultTitle').textContent='Votre image compressée est prête.';
+      if($('#before'))$('#before').textContent=fmt(total);
+      if($('#after'))$('#after').textContent=fmt(result.data.length);
+      if($('#saving'))$('#saving').textContent=Math.max(0,(1-result.data.length/total)*100).toFixed(1)+' %';
+      if($('#targetMetric'))$('#targetMetric').textContent=currentProfile==='small'?'Plus petit':'Smart';
+      if($('#status')){$('#status').className='status '+(result.changed?'good':'warn');$('#status').textContent=result.changed?'✓ Image recompressée réellement : le fichier de sortie est plus petit.':'⚠ Cette image est déjà très optimisée avec les formats disponibles.'}
+      if($('#note'))$('#note').textContent='La sortie est une vraie image '+(result.name.toLowerCase().endsWith('.webp')?'WebP':'compressée')+' et non un ZIP. Tout le traitement reste local dans votre navigateur.';
+      return;
+    }
+
+    const data=await prepareData(currentFiles,currentProfile),target=readVipTarget(),out=await buildZip(data,currentProfile,target);
     archive=new Blob([out],{type:'application/zip'});downloadName='compresseur-de-luluclc3.zip';progress(100,'TERMINÉ','Compression maximale terminée localement');await new Promise(r=>setTimeout(r,300));
     $('#progress')?.classList.add('hidden');$('#result')?.classList.remove('hidden');
     if($('#resultEyebrow'))$('#resultEyebrow').textContent='COMPRESSION TERMINÉE';if($('#resultTitle'))$('#resultTitle').textContent='Votre archive est prête.';
