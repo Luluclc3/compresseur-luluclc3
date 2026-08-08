@@ -31,7 +31,10 @@ jobs:
           from pathlib import Path
           p = Path('index.html')
           s = p.read_text(encoding='utf-8')
-          for src in ('upgrade.js', 'admin.js'):
+          css = '<link rel="stylesheet" href="animations.css">'
+          if css not in s:
+              s = s.replace('</head>', css + '</head>')
+          for src in ('upgrade.js', 'admin.js', 'ux.js'):
               tag = f'<script src="{src}"></script>'
               if tag not in s:
                   s = s.replace('</body>', tag + '</body>')
