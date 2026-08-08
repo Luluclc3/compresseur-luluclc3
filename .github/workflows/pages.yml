@@ -31,9 +31,10 @@ jobs:
           from pathlib import Path
           p = Path('index.html')
           s = p.read_text(encoding='utf-8')
-          tag = '<script src="upgrade.js"></script>'
-          if tag not in s:
-              s = s.replace('</body>', tag + '</body>')
+          for src in ('upgrade.js', 'admin.js'):
+              tag = f'<script src="{src}"></script>'
+              if tag not in s:
+                  s = s.replace('</body>', tag + '</body>')
           p.write_text(s, encoding='utf-8')
           PY
       - name: Upload site
