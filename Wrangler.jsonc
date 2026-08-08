@@ -5,11 +5,5 @@
   "assets": {
     "directory": "public",
     "binding": "ASSETS"
-  },
-  "kv_namespaces": [
-    {
-      "binding": "ANALYTICS",
-      "id": "597f128e0022450e846415d891dfb31e"
-    }
-  ]
+  }
 }
