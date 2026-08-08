@@ -52,7 +52,86 @@
     return bytesFrom(value, unit?.value||'Ko');
   };
 
-  async function buildZip(data, profileName, targetBytes){
+  const imageInfo=(f)=>{
+    const n=f.name.toLowerCase();
+    const type=f.type||'';
+    if(type==='image/jpeg'||type==='image/jpg'||/\.(jpe?g)$/i.test(n))return {kind:'jpeg',mime:'image/jpeg',ext:'.jpg'};
+    if(type==='image/png'||/\.png$/i.test(n))return {kind:'png',mime:'image/webp',ext:'.webp'};
+    if(type==='image/webp'||/\.webp$/i.test(n))return {kind:'webp',mime:'image/webp',ext:'.webp'};
+    return null;
+  };
+
+  const qualityFor=(profileName)=>profileName==='small'?0.55:profileName==='ultra'?0.42:0.76;
+  const maxDimensionFor=(profileName)=>profileName==='small'?1920:profileName==='ultra'?1600:2560;
+
+  async function blobToBytes(blob){
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  async function compressImageFile(file,profileName,index,totalImages){
+    const info=imageInfo(file);
+    if(!info)return {name:file.name,data:new Uint8Array(await file.arrayBuffer()),changed:false};
+
+    progress(5+(index/Math.max(totalImages,1))*25,'OPTIMISATION','Compression réelle de '+file.name+'…');
+
+    try{
+      const bitmap=await createImageBitmap(file);
+      const maxDim=maxDimensionFor(profileName);
+      const scale=Math.min(1,maxDim/Math.max(bitmap.width,bitmap.height));
+      const width=Math.max(1,Math.round(bitmap.width*scale));
+      const height=Math.max(1,Math.round(bitmap.height*scale));
+      const canvas=document.createElement('canvas');
+      canvas.width=width;canvas.height=height;
+      const ctx=canvas.getContext('2d',{alpha:true});
+      if(!ctx)throw new Error('Canvas indisponible');
+      ctx.drawImage(bitmap,0,0,width,height);
+      bitmap.close?.();
+
+      const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Compression image impossible')),info.mime,qualityFor(profileName)));
+      const out=await blobToBytes(blob);
+      const original=new Uint8Array(await file.arrayBuffer());
+
+      // On garde toujours le plus petit résultat : une image déjà très optimisée
+      // ne doit jamais être agrandie artificiellement.
+      if(out.length>=original.length){
+        progress(30+(index/Math.max(totalImages,1))*25,'OPTIMISATION',file.name+' est déjà très optimisé.');
+        return {name:file.name,data:original,changed:false};
+      }
+
+      const base=file.name.replace(/\.[^.]+$/,'');
+      const newName=base+info.ext;
+      progress(30+(index/Math.max(totalImages,1))*25,'OPTIMISATION',fmt(file.size)+' → '+fmt(out.length)+' · '+newName);
+      return {name:newName,data:out,changed:true};
+    }catch(e){
+      console.warn('Compression image impossible',file.name,e);
+      return {name:file.name,data:new Uint8Array(await file.arrayBuffer()),changed:false};
+    }
+  }
+
+  async function prepareData(currentFiles,profileName){
+    const data={};
+    const images=currentFiles.filter(f=>imageInfo(f));
+    const total=currentFiles.length;
+    let done=0;
+
+    for(const f of currentFiles){
+      if($('#pname'))$('#pname').textContent=f.name;
+      const imageIndex=images.indexOf(f);
+      if(imageIndex>=0){
+        const result=await compressImageFile(f,profileName,imageIndex,images.length);
+        data[result.name]=result.data;
+      }else{
+        const buf=await f.arrayBuffer();
+        data[f.name]=new Uint8Array(buf);
+      }
+      done++;
+      progress(35+(done/Math.max(total,1))*25,'ANALYSE','Fichier '+done+'/'+total+' préparé');
+      await new Promise(r=>setTimeout(r,0));
+    }
+    return data;
+  }
+
+  async function buildZip(data,profileName,targetBytes){
     const levels=profileName==='small'
       ? [9]
       : profileName==='smart'
@@ -67,75 +146,53 @@
       const level=levels[i];
       await new Promise(r=>setTimeout(r,0));
       const out=fflate.zipSync(data,{level});
-      if(!best||out.length<best.length) best=out;
-      if(targetBytes&&out.length<=targetBytes&&(!bestUnderTarget||out.length>bestUnderTarget.length)) bestUnderTarget=out;
-
-      if(profileName==='smart'){
-        progress(72,'COMPRESSION','Profil Smart · niveau ZIP 6/9');
-      }else if(profileName==='small'){
-        progress(78,'COMPRESSION','Profil Plus petit · niveau ZIP 9/9');
-      }else{
-        progress(65+(i/lastIndex)*30,'OPTIMISATION','Test du niveau ZIP '+level+'/9…');
-      }
+      if(!best||out.length<best.length)best=out;
+      if(targetBytes&&out.length<=targetBytes&&(!bestUnderTarget||out.length>bestUnderTarget.length))bestUnderTarget=out;
+      progress(65+(i/lastIndex)*30,'COMPRESSION','Archive ZIP · niveau '+level+'/9…');
     }
 
     progress(92,'FINALISATION','Archive prête à être générée…');
-    return targetBytes&&bestUnderTarget ? bestUnderTarget : best;
+    return targetBytes&&bestUnderTarget?bestUnderTarget:best;
   }
 
   const startBtn=$('#start');
   if(startBtn){
     startBtn.onclick=async()=>{
       const currentFiles=getFiles();
-      if(!currentFiles.length) return;
+      if(!currentFiles.length)return;
 
       const currentProfile=getProfile();
       const targetInput=$('#target');
-      const targetValue=targetInput?.value?.trim?.() ?? '';
-      if(typeof vip!=='undefined' && !vip && targetValue){
-        if($('#targetRead')) $('#targetRead').innerHTML='✦ La cible exacte est réservée au VIP.';
-        if(typeof openVip==='function') openVip();
+      const targetValue=targetInput?.value?.trim?.()??'';
+      if(typeof vip!=='undefined'&&!vip&&targetValue){
+        if($('#targetRead'))$('#targetRead').innerHTML='✦ La cible exacte est réservée au VIP.';
+        if(typeof openVip==='function')openVip();
         return;
       }
 
-      if(typeof showProgress==='function') showProgress('Préparation de l’archive');
-      else smoothShow('Préparation de l’archive');
-
-      const total=typeof totalSize==='function' ? totalSize() : currentFiles.reduce((a,f)=>a+(f?.size||0),0);
-      const data={};
-      let done=0;
-      for(const f of currentFiles){
-        if($('#pname')) $('#pname').textContent=f.name;
-        const buf=await f.arrayBuffer();
-        data[f.name]=new Uint8Array(buf);
-        done+=(f.size||0);
-        progress(Math.min(60,total?done/total*60:60),'LECTURE','Lecture locale de '+f.name);
-      }
-
+      showProgress('Préparation de la compression');
+      const total=currentFiles.reduce((a,f)=>a+(f?.size||0),0);
+      const data=await prepareData(currentFiles,currentProfile);
       const target=readVipTarget();
       const out=await buildZip(data,currentProfile,target);
       archive=new Blob([out],{type:'application/zip'});
       downloadName='compresseur-de-luluclc3.zip';
 
-      progress(100,'TERMINÉ','Archive générée localement');
+      progress(100,'TERMINÉ','Compression réelle terminée localement');
       await new Promise(r=>setTimeout(r,300));
       $('#progress')?.classList.add('hidden');
       $('#result')?.classList.remove('hidden');
-      if($('#resultEyebrow')) $('#resultEyebrow').textContent='COMPRESSION TERMINÉE';
-      if($('#resultTitle')) $('#resultTitle').textContent='Votre archive est prête.';
-      if($('#before')) $('#before').textContent=fmt(total);
-      if($('#after')) $('#after').textContent=fmt(out.length);
-      if($('#saving')) $('#saving').textContent=Math.max(0,(1-out.length/total)*100).toFixed(1)+' %';
-      if($('#targetMetric')) $('#targetMetric').textContent=target?fmt(target):(currentProfile==='small'?'Plus petit':'Smart');
+      if($('#resultEyebrow'))$('#resultEyebrow').textContent='COMPRESSION TERMINÉE';
+      if($('#resultTitle'))$('#resultTitle').textContent='Votre archive est prête.';
+      if($('#before'))$('#before').textContent=fmt(total);
+      if($('#after'))$('#after').textContent=fmt(out.length);
+      if($('#saving'))$('#saving').textContent=Math.max(0,(1-out.length/total)*100).toFixed(1)+' %';
+      if($('#targetMetric'))$('#targetMetric').textContent=target?fmt(target):(currentProfile==='small'?'Plus petit':'Smart');
 
       const exactTarget=target?out.length<=target:null;
       const statusText=target
-        ? (exactTarget
-            ? '✓ Cible atteinte : l’archive est sous la taille demandée.'
-            : '⚠ Cible trop basse : même avec le meilleur niveau ZIP, cette taille n’est pas atteignable sans modifier les fichiers.')
-        : (currentProfile==='small'
-            ? '✓ Profil Plus petit appliqué : compression maximale ZIP.'
-            : '✓ Profil Smart appliqué : compression équilibrée ZIP.');
+        ?(exactTarget?'✓ Cible atteinte : l’archive est sous la taille demandée.':'⚠ Cible trop basse : même après compression réelle, cette taille n’est pas atteignable sans dégrader davantage les fichiers.')
+        :(currentProfile==='small'?'✓ Compression réelle appliquée : images réencodées puis ZIP maximal.':'✓ Compression réelle appliquée : les images sont réencodées puis archivées en ZIP.');
 
       if($('#status')){
         $('#status').className='status '+(target?(exactTarget?'good':'warn'):'good');
@@ -145,10 +202,8 @@
       const hasVideo=currentFiles.some(f=>f.type?.startsWith('video')||/\.(mp4|mov|mkv|avi|webm)$/i.test(f.name));
       if($('#note')){
         $('#note').textContent=hasVideo
-          ? 'Les vidéos sont conservées sans perte : ZIP ne réencode pas leur contenu. Pour une forte réduction de MP4/MOV/MKV, une future version FFmpeg pourra proposer un vrai réglage qualité/taille.'
-          : (currentProfile==='small'
-              ? 'Le profil Plus petit force le niveau ZIP maximal. Aucun fichier n’a été envoyé à un serveur.'
-              : 'Le profil Smart applique un bon compromis. Aucun fichier n’a été envoyé à un serveur.');
+          ? 'Les images sont réellement recompressées dans le navigateur. Les vidéos restent intactes pour le moment : une vraie réduction vidéo nécessite un moteur vidéo comme FFmpeg.'
+          :'Les images sont réellement recompressées dans le navigateur avant la création du ZIP. Aucun fichier n’est envoyé à un serveur.';
       }
     };
   }
@@ -156,12 +211,12 @@
   const originalUpdateTargetUI=window.updateTargetUI;
   if(typeof originalUpdateTargetUI==='function'){
     window.updateTargetUI=()=>{
-      if(typeof vip!=='undefined' && !vip){
+      if(typeof vip!=='undefined'&&!vip){
         const input=$('#target'),range=$('#targetRange'),rangePct=$('#rangePct'),read=$('#targetRead');
-        if(input) input.value='';
-        if(range) range.value='100';
-        if(rangePct) rangePct.textContent='100 %';
-        if(read) read.innerHTML='Aucune cible précise en mode standard. <b>Smart</b> et <b>Plus petit</b> sont disponibles sans VIP.';
+        if(input)input.value='';
+        if(range)range.value='100';
+        if(rangePct)rangePct.textContent='100 %';
+        if(read)read.innerHTML='Aucune cible précise en mode standard. <b>Smart</b> et <b>Plus petit</b> sont disponibles sans VIP.';
         return;
       }
       originalUpdateTargetUI();
