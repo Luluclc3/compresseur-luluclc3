@@ -5,6 +5,11 @@ const cors = {
   'Cache-Control': 'no-store'
 };
 
+// Mémoire temporaire du Worker : aucune KV/D1/R2 nécessaire.
+// Elle peut être vidée quand Cloudflare recycle l'isolat, ce qui est volontaire.
+const events = globalThis.__LULU_ANALYTICS__ || (globalThis.__LULU_ANALYTICS__ = []);
+const MAX_EVENTS = 500;
+
 function response(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -39,6 +44,56 @@ async function validAdmin(token,env) {
   } catch { return false; }
 }
 
+function num(value, min = 0, max = 10**15) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : 0;
+}
+function text(value, max = 120) { return String(value ?? '').slice(0, max); }
+
+function recordEvent(event, request) {
+  const cf = request.cf || {};
+  const safe = {
+    id: crypto.randomUUID(),
+    ts: Date.now(),
+    type: text(event.type || 'unknown', 40),
+    session: text(event.session, 80),
+    durationMs: num(event.durationMs, 0, 7*24*60*60*1000),
+    operation: text(event.operation, 40),
+    files: num(event.files, 0, 999),
+    bytesIn: num(event.bytesIn),
+    bytesOut: num(event.bytesOut),
+    savedPct: Number.isFinite(Number(event.savedPct)) ? Math.max(-100, Math.min(100, Number(event.savedPct))) : null,
+    profile: text(event.profile, 30),
+    success: event.success !== false,
+    lang: text(event.lang, 30),
+    timezone: text(event.timezone, 80),
+    screen: text(event.screen, 30),
+    userAgent: text(request.headers.get('User-Agent'), 240),
+    acceptLanguage: text(request.headers.get('Accept-Language'), 160),
+    referer: text(request.headers.get('Referer'), 240),
+
+    // Métadonnées réseau/Cloudflare utiles à l'admin, sans enregistrer l'IP brute.
+    country: text(request.headers.get('CF-IPCountry') || cf.country, 4),
+    continent: text(cf.continent, 8),
+    region: text(cf.region, 80),
+    city: text(cf.city, 80),
+    postalCode: text(cf.postalCode, 24),
+    cfTimezone: text(cf.timezone, 80),
+    latitude: text(cf.latitude, 32),
+    longitude: text(cf.longitude, 32),
+    colo: text(cf.colo, 16),
+    asn: num(cf.asn, 0, 2**32),
+    asOrganization: text(cf.asOrganization, 160),
+    httpProtocol: text(cf.httpProtocol, 20),
+    tlsVersion: text(cf.tlsVersion, 30),
+    tlsCipher: text(cf.tlsCipher, 60)
+  };
+
+  events.unshift(safe);
+  if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
+  return safe;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
@@ -57,31 +112,24 @@ export default {
     }
 
     if(body?.kind==='event') {
-      if(!env.ANALYTICS_KV)return response({ok:false,error:'Analytics storage not configured'},503);
-      const event=body.event||{};
-      const safe={
-        id:crypto.randomUUID(), ts:Date.now(), type:String(event.type||'unknown').slice(0,40),
-        session:String(event.session||'').slice(0,80), durationMs:Number(event.durationMs)||0,
-        operation:String(event.operation||'').slice(0,40), files:Math.min(999,Math.max(0,Number(event.files)||0)),
-        bytesIn:Math.min(10**15,Math.max(0,Number(event.bytesIn)||0)), bytesOut:Math.min(10**15,Math.max(0,Number(event.bytesOut)||0)),
-        savedPct:Number.isFinite(Number(event.savedPct))?Math.max(-100,Math.min(100,Number(event.savedPct))):null,
-        profile:String(event.profile||'').slice(0,30), success:event.success!==false,
-        lang:String(event.lang||'').slice(0,20), timezone:String(event.timezone||'').slice(0,60),
-        screen:String(event.screen||'').slice(0,30), userAgent:String(request.headers.get('User-Agent')||'').slice(0,240),
-        country:String(request.headers.get('CF-IPCountry')||'').slice(0,4), colo:String(request.cf?.colo||'').slice(0,12)
-      };
-      await env.ANALYTICS_KV.put('event:'+safe.ts+':'+safe.id,JSON.stringify(safe),{expirationTtl:60*60*24*30});
-      return response({ok:true});
+      recordEvent(body.event || {}, request);
+      return response({ok:true,buffered:events.length});
     }
 
     if(body?.kind==='list') {
       if(!(await validAdmin(body.token,env)))return response({ok:false,error:'Unauthorized'},401);
-      if(!env.ANALYTICS_KV)return response({ok:false,error:'Analytics storage not configured'},503);
-      const listed=await env.ANALYTICS_KV.list({prefix:'event:',limit:1000});
-      const events=[];
-      for(const k of listed.keys){const v=await env.ANALYTICS_KV.get(k.name);if(v)try{events.push(JSON.parse(v))}catch{}}
-      events.sort((a,b)=>b.ts-a.ts);
-      return response({ok:true,events:events.slice(0,500)});
+      return response({
+        ok:true,
+        events:events.slice(0,500),
+        meta:{
+          now:Date.now(),
+          buffered:events.length,
+          maxBuffered:MAX_EVENTS,
+          persistent:false,
+          storage:'worker-memory',
+          note:'Les événements peuvent disparaître lors du recyclage du Worker.'
+        }
+      });
     }
 
     if (typeof body?.code !== 'string' || body.code.length > 128) return response({ ok: false, error: 'Invalid code' }, 400);
