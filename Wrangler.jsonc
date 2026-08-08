@@ -1,1 +1,15 @@
-{ "$schema": "node_modules/wrangler/config-schema.json", "name": "compresseur-lulucl3", "compatibility_date": "2026-08-08", "assets": { "directory": "public", "binding": "ASSETS" }, "kv_namespaces": [ { "binding": "ANALYTICS", "id": "compresseur-analytics" } ] }
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "compresseur-lulucl3",
+  "compatibility_date": "2026-08-08",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "ANALYTICS",
+      "id": "597f128e0022450e846415d891dfb31e"
+    }
+  ]
+}
